@@ -1,0 +1,30 @@
+value = { int | string | name | list_decl }
+
+string = ${"\"" ~ inner ~ "\""}
+inner = @{char*}
+char = {
+    !("\"" | "\\") ~ ANY
+    | "\\" ~ ("\"" | "\\" | "b" | "f" | "n" | "r" | "t")
+    | "\\" ~ ("u" ~ ASCII_HEX_DIGIT{4})
+}
+int = @{("+" | "-")? ~ ASCII_DIGIT+}
+
+name = @{ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")*}
+expr = { "{" ~ (statement ~ ";")* ~ expr ~ "}" | cond | call | value | func_definition }
+list = {(expr ~ ",")* ~ expr? }
+cond = { "if" ~ expr ~ "{" ~ expr ~ "}" ~ "/" ~ "{" ~ expr ~ "}" }
+list_decl = { "[" ~ list ~ "]" }
+
+rec_call = {"rec"}
+call = {(rec_call | name) ~ "(" ~ arguments ~ ")" }
+arguments = {((expr | placeholder) ~ ",")* ~ (expr | placeholder)?}
+placeholder = { "_" }
+
+namelist = {(name ~ ",")* ~ name?}
+func_definition = {"(" ~ namelist ~ ")" ~ "->" ~ expr }
+
+statement = { assign }
+assign = {name ~ "=" ~ expr }
+program = {SOI ~ (statement ~ ";")* ~ (statement | expr)? ~ EOI}
+
+WHITESPACE = _{ " " | "\t" }

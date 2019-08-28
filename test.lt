@@ -1,0 +1,2 @@
+repeat = (f, i, n) -> if eq(n, 0) { i } / { rec(f, f(i), sub(n, 1)) };;
+compose = (f, g) -> (x) -> f(g(x));;

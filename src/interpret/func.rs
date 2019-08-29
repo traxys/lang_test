@@ -321,10 +321,60 @@ pub fn get_builtins() -> HashMap<String, BuiltIn> {
         },
     );
     m.insert(
+        "gt".to_string(),
+        BuiltIn {
+            f: Box::new(|args| Ok(Rc::new(Value::Bool(args[0].as_int() > args[1].as_int())))),
+            expected: vec![Some(Type::Int), Some(Type::Int)],
+        },
+    );
+    m.insert(
+        "lt".to_string(),
+        BuiltIn {
+            f: Box::new(|args| Ok(Rc::new(Value::Bool(args[0].as_int() < args[1].as_int())))),
+            expected: vec![Some(Type::Int),Some(Type::Int)],
+        },
+    );
+    m.insert(
+        "and".to_string(),
+        BuiltIn {
+            f: Box::new(|args| Ok(Rc::new(Value::Bool(args[0].as_bool() == true && args[1].as_bool() == true)))),
+            expected: vec![Some(Type::Bool),Some(Type::Bool)],
+        }
+    );
+
+    m.insert(
+        "or".to_string(),
+        BuiltIn {
+            f: Box::new(|args| Ok(Rc::new(Value::Bool(args[0].as_bool() == true || args[1].as_bool() == true)))),
+            expected: vec![Some(Type::Bool),Some(Type::Bool)],
+        }
+    );
+    m.insert(
         "add".to_string(),
         BuiltIn {
             f: Box::new(|args| Ok(Rc::new(Value::Int(args[0].as_int() + args[1].as_int())))),
             expected: vec![Some(Type::Int), Some(Type::Int)],
+        },
+    );
+    m.insert(
+        "mult".to_string(),
+        BuiltIn {
+            f: Box::new(|args| Ok(Rc::new(Value::Int(args[0].as_int() * args[1].as_int())))),
+            expected: vec![Some(Type::Int), Some(Type::Int)]
+        },
+    );
+    m.insert(
+        "div".to_string(),
+        BuiltIn {
+            f: Box::new(|args| Ok(Rc::new(Value::Int(args[0].as_int() / args[1].as_int())))),
+            expected: vec![Some(Type::Int),Some(Type::Int)],
+        },
+    );
+    m.insert(
+        "mod".to_string(),
+        BuiltIn {
+            f: Box::new(|args| Ok(Rc::new(Value::Int(args[0].as_int() % args[1].as_int())))),
+            expected: vec![Some(Type::Int),Some(Type::Int)],
         },
     );
     m.insert(

@@ -23,6 +23,7 @@ pub enum Litteral {
 
 #[derive(Debug, Clone)]
 pub enum CallType {
+    Resolved(Rc<interpret::Value>),
     Name(String),
     Recursive,
 }
@@ -30,9 +31,9 @@ pub enum CallType {
 #[derive(Debug, Clone)]
 pub enum ASTNode {
     Litteral(Litteral),
-    Call {
+    MultiCall {
         kind: CallType,
-        args: Vec<ASTNode>,
+        applications: Vec<Vec<ASTNode>>,
     },
     Assign {
         lhs: String,
@@ -65,7 +66,7 @@ impl ASTNode {
             | ASTNode::Value(_)
             | ASTNode::Expr { .. }
             | ASTNode::List(_)
-            | ASTNode::Call { .. }
+            | ASTNode::MultiCall { .. }
             | ASTNode::Placeholder => true,
             _ => false,
         }
@@ -105,22 +106,34 @@ fn parse_litteral(pair: pest::iterators::Pair<Rule>) -> ASTNode {
     }
 }
 
+fn parse_call(pair: pest::iterators::Pair<Rule>) -> (CallType, Vec<ASTNode>) {
+    let mut pair = pair.into_inner();
+    let call_id = pair.next().unwrap();
+    let kind = match call_id.as_rule() {
+        Rule::rec_call => CallType::Recursive,
+        Rule::name => CallType::Name(call_id.as_str().to_string()),
+        _ => unreachable!(),
+    };
+    let args = pair.next().unwrap();
+    let args = parse_arguments(args);
+    (kind, args)
+}
+
+fn parse_multi_call(mut pairs: pest::iterators::Pairs<Rule>) -> ASTNode {
+    let first = pairs.next().unwrap();
+    let (kind, first) = parse_call(first);
+    let mut applications = vec![first];
+    for args in pairs {
+        applications.push(parse_arguments(args))
+    }
+    ASTNode::MultiCall { kind, applications }
+}
+
 fn parse_expr(mut pairs: pest::iterators::Pairs<Rule>) -> ASTNode {
     let first = pairs.next().unwrap();
     match first.as_rule() {
         Rule::placeholder => ASTNode::Placeholder,
-        Rule::call => {
-            let mut pair = first.into_inner();
-            let call_id = pair.next().unwrap();
-            let kind = match call_id.as_rule() {
-                Rule::rec_call => CallType::Recursive,
-                Rule::name => CallType::Name(call_id.as_str().to_string()),
-                _ => unreachable!(),
-            };
-            let args = pair.next().unwrap();
-            let args = parse_arguments(args);
-            ASTNode::Call { kind, args }
-        }
+        Rule::multi_call => parse_multi_call(first.into_inner()),
         Rule::value => parse_litteral(first.into_inner().next().unwrap()),
         Rule::func_definition => {
             let mut pair = first.into_inner();

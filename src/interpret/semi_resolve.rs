@@ -37,6 +37,25 @@ fn semi_statement(
     }
 }
 
+fn semi_list(
+    ast: Vec<ASTNode>,
+    exclude: &HashSet<String>,
+    known: &mut HashSet<String>,
+    ctx: &mut Context,
+) -> Result<ResolveResult, EvalError> {
+    let mut values = vec![];
+    let mut rec_total = false;
+    for node in ast {
+        let ResolveResult { ast, is_rec } = semi_expr(node, exclude, known, ctx)?;
+        rec_total |= is_rec;
+        values.push(ast);
+    }
+    Ok(ResolveResult {
+        ast: ASTNode::List(values),
+        is_rec: rec_total,
+    })
+}
+
 pub fn semi_expr(
     ast: ASTNode,
     exclude: &HashSet<String>,
@@ -47,6 +66,7 @@ pub fn semi_expr(
         ASTNode::Litteral(lit) => {
             semi_litteral(lit, exclude, known, ctx).map(|ast| ResolveResult { ast, is_rec: false })
         }
+        ASTNode::List(v) => semi_list(v, exclude, known, ctx),
         ASTNode::Expr {
             body,
             end_expr: expr,
@@ -74,13 +94,14 @@ pub fn semi_expr(
                 is_rec: is_any_rec,
             })
         }
-        ASTNode::Call { kind, args } => {
+        ASTNode::MultiCall { kind, applications } => {
             let mut is_any_rec = false;
             if let crate::CallType::Recursive = &kind {
                 is_any_rec = true;
             };
+            let mut applications = applications.into_iter();
             let mut v_args = vec![];
-            for arg in args {
+            for arg in applications.next().unwrap() {
                 if let ASTNode::Placeholder = arg {
                     v_args.push(ASTNode::Placeholder)
                 } else {
@@ -91,9 +112,54 @@ pub fn semi_expr(
                     });
                 }
             }
-            semi_function(kind, v_args, ctx).map(|ast| ResolveResult {
-                ast,
-                is_rec: is_any_rec,
+            let mut partial = semi_function(kind.clone(), v_args, ctx)?;
+            let mut can_eval = if let ASTNode::Value(_) = &partial {
+                true
+            } else {
+                false
+            };
+            let mut to_add_applications = vec![];
+            for args in applications {
+                let mut v_args = vec![];
+                for arg in args {
+                    if let ASTNode::Placeholder = arg {
+                        v_args.push(ASTNode::Placeholder)
+                    } else {
+                        v_args.push({
+                            let ResolveResult { ast, is_rec } =
+                                semi_expr(arg, exclude, known, ctx)?;
+                            is_any_rec |= is_rec;
+                            ast
+                        });
+                    }
+                }
+                if can_eval {
+                    partial = semi_function(kind.clone(), v_args, ctx)?;
+                    can_eval = if let ASTNode::Value(_) = &partial {
+                        true
+                    } else {
+                        false
+                    };
+                } else {
+                    to_add_applications.push(v_args)
+                }
+            }
+            Ok(match partial {
+                ASTNode::Value(f) => ResolveResult {
+                    ast: ASTNode::Value(f),
+                    is_rec: is_any_rec,
+                },
+                ASTNode::MultiCall {
+                    kind,
+                    mut applications,
+                } => {
+                    applications.append(&mut to_add_applications);
+                    ResolveResult {
+                        ast: ASTNode::MultiCall { kind, applications },
+                        is_rec: is_any_rec,
+                    }
+                }
+                _ => unreachable!(),
             })
         }
         ASTNode::FuncDef { arg_names, body } => {
@@ -164,34 +230,47 @@ fn semi_function(
     args: Vec<ASTNode>,
     ctx: &Context,
 ) -> Result<ASTNode, EvalError> {
+    let compute = |var: Rc<Value>, args: Vec<ASTNode>| {
+        var.assert_type(Type::Func)?;
+        if args.iter().all(|n| match n {
+            ASTNode::Placeholder | ASTNode::Value(_) => true,
+            _ => false,
+        }) {
+            let mut v_args = vec![];
+            for arg in args {
+                match arg {
+                    ASTNode::Placeholder => v_args.push(None),
+                    ASTNode::Value(v) => v_args.push(Some(v)),
+                    _ => unreachable!(),
+                }
+            }
+            let f = var.as_function();
+            Ok(ASTNode::Value(
+                f.plug(v_args, ctx).map_err(EvalError::from)?,
+            ))
+        } else {
+            Ok(ASTNode::MultiCall {
+                kind: kind.clone(),
+                applications: vec![args],
+            })
+        }
+    };
     match kind.clone() {
         crate::CallType::Name(name) => {
             if let Ok(var) = ctx.get(name) {
-                var.assert_type(Type::Func)?;
-                if args.iter().all(|n| match n {
-                    ASTNode::Placeholder | ASTNode::Value(_) => true,
-                    _ => false,
-                }) {
-                    let mut v_args = vec![];
-                    for arg in args {
-                        match arg {
-                            ASTNode::Placeholder => v_args.push(None),
-                            ASTNode::Value(v) => v_args.push(Some(v)),
-                            _ => unreachable!(),
-                        }
-                    }
-                    let f = var.as_function();
-                    Ok(ASTNode::Value(
-                        f.plug(v_args, ctx).map_err(EvalError::from)?,
-                    ))
-                } else {
-                    Ok(ASTNode::Call { kind, args })
-                }
+                compute(var, args)
             } else {
-                Ok(ASTNode::Call { kind, args })
+                Ok(ASTNode::MultiCall {
+                    kind,
+                    applications: vec![args],
+                })
             }
         }
-        _ => Ok(ASTNode::Call { kind, args }),
+        crate::CallType::Resolved(var) => compute(var, args),
+        crate::CallType::Recursive => Ok(ASTNode::MultiCall {
+            kind,
+            applications: vec![args],
+        }),
     }
 }
 

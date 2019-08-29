@@ -149,16 +149,31 @@ fn interpret_expr(ast: ASTNode, ctx: &mut Context) -> Result<RefValue, EvalError
             }
             interpret_expr(*expr, ctx)
         }
-        ASTNode::Call { kind, args } => {
+        ASTNode::MultiCall { kind, applications } => {
+            let mut applications = applications.into_iter();
             let mut v_args = vec![];
-            for arg in args {
+            for arg in applications.next().unwrap() {
                 if let ASTNode::Placeholder = arg {
                     v_args.push(None)
                 } else {
                     v_args.push(Some(interpret_expr(arg, ctx)?));
                 }
             }
-            call_function(kind, v_args, ctx)
+            let mut applicant = call_function(kind, v_args, ctx)?;
+            for args in applications {
+                let mut v_args = vec![];
+                for arg in args {
+                    if let ASTNode::Placeholder = arg {
+                        v_args.push(None)
+                    } else {
+                        v_args.push(Some(interpret_expr(arg, ctx)?));
+                    }
+                }
+                applicant.assert_type(Type::Func)?;
+                let f = applicant.as_function();
+                applicant = f.plug(v_args, ctx)?;
+            }
+            Ok(applicant)
         }
         ASTNode::FuncDef { arg_names, body } => {
             let expected = arg_names.iter().cloned().collect();
@@ -206,6 +221,7 @@ fn call_function(
             }
         }
         CallType::Name(name) => ctx.get(name)?,
+        CallType::Resolved(f) => f,
     };
     var.assert_type(Type::Func)?;
     let f = var.as_function();
